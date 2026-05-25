@@ -1273,66 +1273,85 @@ function hostNextTurn() {
    ENTER GAME (todos)
 ════════════════════════════════════════════════ */
 function enterGame(payload) {
-  const drawer   = G.players[payload.drawerIdx];
-  const iAmDrawer = drawer && drawer.name === myName;
+  const drawer    = G.players[payload.drawerIdx];
+  const myId      = peer ? peer.id : null;
+  // Identify by ID first, fallback to name
+  const iAmDrawer = drawer && (drawer.id === myId || drawer.name === myName);
 
-  // Update UI
-  document.getElementById('g-room-name').textContent = isHost ? `${myName}'s sala` : `Sala`;
-  document.getElementById('g-round').textContent    = `Ronda ${payload.round}/${TOTAL_ROUNDS}`;
-  document.getElementById('g-who').textContent      = iAmDrawer ? '¡Vos dibujás!' : `${drawer?.name||'—'}`;
+  // Update top bar
+  document.getElementById('g-room-name').textContent = `Sala de ${G.players[0]?.name||'—'}`;
+  document.getElementById('g-round').textContent     = `Ronda ${payload.round}/${TOTAL_ROUNDS}`;
+  document.getElementById('g-who').textContent       = iAmDrawer ? '¡Vos dibujás!' : `${drawer?.name||'—'}`;
 
   // Dots
-  const dots = document.getElementById('g-dots');
-  dots.innerHTML = G.players.slice(0,5).map(p=>`<div class="game-dot ${p.avi}">${p.emoji}</div>`).join('');
+  document.getElementById('g-dots').innerHTML =
+    G.players.slice(0,5).map(p=>`<div class="game-dot ${p.avi}">${p.emoji}</div>`).join('');
 
   // Role banner
-  const banner = document.getElementById('role-banner');
-  banner.className = 'role-banner '+(iAmDrawer?'drawer':'guesser');
-  document.getElementById('r-icon').textContent = iAmDrawer?'🖌️':'🔍';
-  document.getElementById('r-lbl').textContent  = iAmDrawer?'Tu palabra:':'Turno de '+drawer?.name;
-  document.getElementById('r-val').className    = 'r-val'+(iAmDrawer?' word':'');
-  document.getElementById('r-val').textContent  = iAmDrawer?(payload.word||G.word):'Adiviná lo que dibujan';
+  document.getElementById('role-banner').className = 'role-banner '+(iAmDrawer?'drawer':'guesser');
+  document.getElementById('r-icon').textContent    = iAmDrawer ? '🖌️' : '🔍';
+  document.getElementById('r-lbl').textContent     = iAmDrawer ? 'Tu palabra:' : 'Turno de '+(drawer?.name||'—');
+  document.getElementById('r-val').className       = 'r-val'+(iAmDrawer?' word':'');
+  document.getElementById('r-val').textContent     = iAmDrawer ? (payload.word||G.word) : 'Adiviná lo que dibujan';
 
-  // Canvas mode
-  document.getElementById('canvas-wrap').className = 'canvas-wrap'+(iAmDrawer?'':' guesser');
-  document.getElementById('toolbar').style.display  = iAmDrawer?'flex':'none';
-  document.getElementById('guess-bar').className     = 'guess-bar'+(iAmDrawer?'':' visible');
-  document.getElementById('guess-inp').disabled      = false;
-  document.getElementById('draw-lbl').textContent    = iAmDrawer?'✏️ Vos dibujás':'👁️ '+(drawer?.name||'—')+' dibuja';
-  document.getElementById('draw-lbl').className      = 'draw-lbl'+(iAmDrawer?' active':'');
+  // Show/hide toolbar vs guess bar
+  document.getElementById('canvas-wrap').className  = 'canvas-wrap'+(iAmDrawer?'':' guesser');
+  document.getElementById('toolbar').style.display  = iAmDrawer ? 'flex' : 'none';
 
-  // Clear canvas
+  const guessBar = document.getElementById('guess-bar');
+  const guessInp = document.getElementById('guess-inp');
+  if (iAmDrawer) {
+    guessBar.className = 'guess-bar';
+    guessInp.disabled  = true;
+  } else {
+    guessBar.className = 'guess-bar visible';
+    guessInp.disabled  = false;
+    guessInp.value     = '';
+  }
+
+  document.getElementById('draw-lbl').textContent = iAmDrawer ? '✏️ Vos dibujás' : '👁️ '+(drawer?.name||'—')+' dibuja';
+  document.getElementById('draw-lbl').className   = 'draw-lbl'+(iAmDrawer?' active':'');
+
   clearChatFeed();
-
-  // Hint bar
   renderHintBar(iAmDrawer?(payload.word||G.word):null, payload.hintRevealed, payload.wordLen);
-
   renderTimer(payload.timerSecs);
+
+  // Show screen first
   showScreen('screen-game');
 
-  // Init canvas AFTER screen is visible so getBoundingClientRect works
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      if (iAmDrawer) {
-        buildPalette(); setupSlider(); setupDrawEvents();
-      } else {
-        // For guessers: init canvas for receiving remote strokes
-        canvas = document.getElementById('canvas');
-        ctx = canvas.getContext('2d');
-        const wrap = document.getElementById('canvas-wrap');
-        const rect = wrap.getBoundingClientRect();
-        const dpr = window.devicePixelRatio||1;
-        canvas.width  = rect.width*dpr;
-        canvas.height = rect.height*dpr;
-        canvas.style.width  = rect.width+'px';
-        canvas.style.height = rect.height+'px';
-        ctx.scale(dpr,dpr);
-        ctx.fillStyle='#f8f6f0';
-        ctx.fillRect(0,0,rect.width,rect.height);
-        strokes=[]; redoStack=[];
-      }
-    });
-  });
+  // Init canvas AFTER screen is painted — use setTimeout to guarantee layout is done
+  setTimeout(() => {
+    canvas = document.getElementById('canvas');
+    ctx    = canvas.getContext('2d');
+    const wrap = document.getElementById('canvas-wrap');
+    const rect  = wrap.getBoundingClientRect();
+    const dpr   = window.devicePixelRatio || 1;
+
+    canvas.width  = rect.width  * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width  = rect.width  + 'px';
+    canvas.style.height = rect.height + 'px';
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = '#f8f6f0';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    strokes   = [];
+    redoStack = [];
+
+    if (iAmDrawer) {
+      buildPalette();
+      setupSlider();
+      // Attach draw events directly to the fresh canvas
+      canvas.addEventListener('pointerdown', onDown, {passive:false});
+      canvas.addEventListener('pointermove', onMove, {passive:false});
+      canvas.addEventListener('pointerup',   onUp);
+      canvas.addEventListener('pointerleave',onUp);
+      canvas.addEventListener('contextmenu', e=>e.preventDefault());
+    } else {
+      // Focus guess input after canvas is ready
+      setTimeout(() => guessInp.focus(), 100);
+    }
+  }, 80); // 80ms is enough for the browser to paint
 }
 
 /* ════════════════════════════════════════════════
@@ -1502,32 +1521,6 @@ function updateStrokeCt() {
   const el=document.getElementById('stroke-ct'); if(!el) return;
   el.textContent=strokes.length;
   el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
-}
-
-function setupDrawEvents() {
-  // Replace canvas element to remove old listeners
-  const old=canvas; const newC=old.cloneNode(false);
-  old.parentNode.replaceChild(newC,old);
-  canvas=newC; ctx=canvas.getContext('2d');
-
-  const dpr  = window.devicePixelRatio||1;
-  const wrap = document.getElementById('canvas-wrap');
-  const rect = wrap.getBoundingClientRect();
-
-  // rect should be valid here since we're called after rAF
-  canvas.width  = rect.width*dpr;
-  canvas.height = rect.height*dpr;
-  canvas.style.width  = rect.width+'px';
-  canvas.style.height = rect.height+'px';
-  ctx.scale(dpr,dpr);
-  ctx.fillStyle='#f8f6f0';
-  ctx.fillRect(0,0,rect.width,rect.height);
-
-  canvas.addEventListener('pointerdown', onDown, {passive:false});
-  canvas.addEventListener('pointermove', onMove, {passive:false});
-  canvas.addEventListener('pointerup',   onUp);
-  canvas.addEventListener('pointerleave',onUp);
-  canvas.addEventListener('contextmenu', e=>e.preventDefault());
 }
 
 function getPos(e) {

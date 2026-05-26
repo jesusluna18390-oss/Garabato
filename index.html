@@ -182,7 +182,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Nunito
 .chat-txt{font-size:12px;font-weight:700}.chat-msg.correct .chat-txt{color:var(--green)}
 
 /* Toolbar */
-.toolbar{background:var(--surface);border-top:1px solid var(--border);padding:9px 11px;display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+.toolbar{background:var(--surface);border-top:1px solid var(--border);padding:9px 11px;display:none;flex-direction:column;gap:8px;flex-shrink:0}
+.toolbar.visible{display:flex}
 .colors{display:flex;gap:5px;overflow-x:auto;padding-bottom:1px}.colors::-webkit-scrollbar{display:none}
 .swatch{width:28px;height:28px;border-radius:50%;border:2.5px solid transparent;cursor:pointer;flex-shrink:0;transition:transform .13s,border-color .13s}
 .swatch:active{transform:scale(.85)}.swatch.active{border-color:var(--text);transform:scale(1.2)}
@@ -858,7 +859,8 @@ function handleClientReceive(data) {
 
   if (type === 'HINT') {
     G.hintRevealed = payload.revealed;
-    renderHintBar(G.word.length ? G.word : null, payload.revealed, payload.wordLen);
+    // G.word may be empty for guessers — use wordLen as fallback
+    renderHintBar(G.word || null, payload.revealed, payload.wordLen);
   }
 
   if (type === 'STROKE') {
@@ -1295,15 +1297,19 @@ function enterGame(payload) {
   document.getElementById('r-val').textContent     = iAmDrawer ? (payload.word||G.word) : 'Adiviná lo que dibujan';
 
   // Show/hide toolbar vs guess bar
-  document.getElementById('canvas-wrap').className  = 'canvas-wrap'+(iAmDrawer?'':' guesser');
-  document.getElementById('toolbar').style.display  = iAmDrawer ? 'flex' : 'none';
+  document.getElementById('canvas-wrap').className = 'canvas-wrap'+(iAmDrawer?'':' guesser');
 
+  const toolbar  = document.getElementById('toolbar');
   const guessBar = document.getElementById('guess-bar');
   const guessInp = document.getElementById('guess-inp');
+
   if (iAmDrawer) {
+    toolbar.className  = 'toolbar visible';
     guessBar.className = 'guess-bar';
     guessInp.disabled  = true;
+    guessInp.value     = '';
   } else {
+    toolbar.className  = 'toolbar';
     guessBar.className = 'guess-bar visible';
     guessInp.disabled  = false;
     guessInp.value     = '';
@@ -1359,15 +1365,17 @@ function enterGame(payload) {
 ════════════════════════════════════════════════ */
 function renderHintBar(word, revealed, wordLen) {
   const bar = document.getElementById('hint-bar');
-  const len = word ? word.length : wordLen;
-  if (!len) { bar.innerHTML=''; return; }
+  const len = (word ? word.length : 0) || wordLen || 0;
+  if (!len) { bar.innerHTML = ''; return; }
 
   let html = '';
-  for (let i=0; i<len; i++) {
-    const ch = word ? word[i] : '?';
-    if (ch===' ') { html+=`<span class="h-space"></span>`; continue; }
+  for (let i = 0; i < len; i++) {
+    const ch   = word ? word[i] : null;
+    const isSpace = ch === ' ';
+    if (isSpace) { html += `<span class="h-space"></span>`; continue; }
     const show = revealed && revealed[i];
-    html+=`<span class="h-letter${show?' shown':''}">${show?ch:''}</span>`;
+    // Always show dash — show letter only when revealed
+    html += `<span class="h-letter${show ? ' shown' : ''}">${show && ch ? ch : ''}</span>`;
   }
   bar.innerHTML = html;
 }
